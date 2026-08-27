@@ -13,7 +13,7 @@ function required(name: string): string {
   if (!value || value.trim() === '') {
     throw new Error(
       `Falta la variable de entorno ${name}. ` +
-        `Cargala en .env.local para desarrollo y en Netlify › Site settings › Environment variables para producción.`,
+        `Cargala en .env.local para desarrollo y en Vercel › Project Settings › Environment Variables para producción.`,
     )
   }
   return value.trim()
