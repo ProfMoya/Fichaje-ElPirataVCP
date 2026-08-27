@@ -184,22 +184,23 @@ export async function deleteEmployee(id: string): Promise<void> {
 /* --------------------------------- fichajes -------------------------------- */
 
 /**
- * El fichaje abierto de hoy para un empleado, si tiene uno. Con horario
- * cortado puede haber varios fichajes cerrados ese mismo día: lo que importa
- * para decidir si el próximo toque abre o cierra es si hay uno sin salida.
+ * El fichaje abierto de un empleado, si tiene uno — sin importar el día en
+ * que empezó. Un turno que arranca 23:50 y sigue abierto pasada la
+ * medianoche no deja de ser "el mismo fichaje sin cerrar" solo porque cambió
+ * la fecha calendario; filtrar por el día de hoy hacía que el kiosco no lo
+ * encontrara y abriera uno nuevo en vez de cerrar el de anoche.
  */
-export async function getOpenPunch(employeeId: string, day: string): Promise<Punch | null> {
+export async function getOpenPunch(employeeId: string): Promise<Punch | null> {
   const { data, error } = await db()
     .from('punches')
     .select(PUNCH_COLS)
     .eq('employee_id', employeeId)
-    .eq('day', day)
     .is('out_min', null)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
 
-  if (error) fail('leer el fichaje abierto de hoy', error)
+  if (error) fail('leer el fichaje abierto', error)
   return data ? toPunch(data as PunchRow) : null
 }
 
@@ -316,10 +317,38 @@ export async function deletePunch(id: string): Promise<void> {
   if (error) fail('eliminar el fichaje', error)
 }
 
-/** Borra los fichajes de un rango de días (inclusive). Usado en el cierre de mes. */
+/**
+ * Borra los fichajes de un rango de días (inclusive). Usado en el cierre de
+ * mes. Nunca borra un fichaje sin salida: si alguien sigue trabajando ese
+ * turno cuando se cierra el mes, perder su hora de entrada sería un dato
+ * imposible de reconstruir.
+ */
 export async function deletePunchesInRange(from: string, to: string): Promise<void> {
-  const { error } = await db().from('punches').delete().gte('day', from).lte('day', to)
+  const { error } = await db()
+    .from('punches')
+    .delete()
+    .gte('day', from)
+    .lte('day', to)
+    .not('out_min', 'is', null)
   if (error) fail('borrar los fichajes del mes', error)
+}
+
+/**
+ * Fichajes sin salida de días anteriores a `beforeDay`, sin ventana de
+ * tiempo: uno olvidado hace dos meses tiene que seguir apareciendo en el
+ * aviso del panel hasta que un admin lo corrija, no desaparecer solo.
+ */
+export async function listDanglingPunches(beforeDay: string, limit = 200): Promise<Punch[]> {
+  const { data, error } = await db()
+    .from('punches')
+    .select(PUNCH_COLS)
+    .lt('day', beforeDay)
+    .is('out_min', null)
+    .order('day', { ascending: true })
+    .limit(limit)
+
+  if (error) fail('cargar las jornadas sin cerrar', error)
+  return (data as PunchRow[]).map(toPunch)
 }
 
 /* -------------------------------- ajustes ---------------------------------- */

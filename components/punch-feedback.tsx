@@ -5,7 +5,7 @@ import { formatDuration, formatLongDate, formatTime } from '@/lib/timeclock'
 import { cn } from '@/lib/utils'
 
 export type Feedback =
-  | { type: 'success'; name: string; kind: 'in' | 'out'; minute: number; workedToday: number }
+  | { type: 'success'; name: string; kind: 'in' | 'out'; minute: number; workedToday: number; turno: number }
   | { type: 'error'; title: string; message: string; icon?: 'alerta' | 'reloj' | 'conexion' }
 
 const ICONS = {
@@ -50,8 +50,14 @@ export function PunchFeedback({ feedback, dayKey }: { feedback: Feedback; dayKey
           <h2 className="text-balance text-3xl font-light tracking-tight sm:text-5xl">
             ¡Hola, <span className="font-medium">{feedback.name.split(' ')[0]}</span>!
           </h2>
-          <p className="text-lg tracking-[0.28em] text-primary uppercase sm:text-xl">
+          <p
+            className={cn(
+              'text-lg tracking-[0.28em] uppercase sm:text-xl',
+              feedback.kind === 'in' ? 'text-success' : 'text-warning',
+            )}
+          >
             {feedback.kind === 'in' ? 'Entrada registrada' : 'Salida registrada'}
+            {feedback.turno > 1 && ` · Turno ${feedback.turno}`}
           </p>
           <p className="text-glow tnum font-mono text-[clamp(3rem,11vw,7rem)] leading-none font-medium">
             {formatTime(feedback.minute)}

@@ -55,7 +55,7 @@ export function AdminLoginForm({ avisoInicial }: { avisoInicial?: string }) {
             <ShieldCheck className="size-7" strokeWidth={1.5} />
           </span>
           <div>
-            <h1 className="text-2xl font-light tracking-tight">Panel MAGA</h1>
+            <h1 className="text-2xl font-light tracking-tight">Panel - El Pirata VCP</h1>
             <p className="mt-1 text-sm font-light text-muted-foreground">
               Acceso restringido al personal autorizado
             </p>

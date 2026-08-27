@@ -1,5 +1,5 @@
 -- ============================================================================
---  Fichaje MAGA · esquema de base de datos (Supabase / PostgreSQL)
+--  Fichaje - El Pirata VCP · esquema de base de datos (Supabase / PostgreSQL)
 -- ============================================================================
 --  Ejecutar una sola vez en el SQL Editor de Supabase.
 --  Es idempotente: se puede volver a correr sin romper nada.
@@ -57,7 +57,15 @@ create table if not exists public.punches (
 -- Antes había un unique (employee_id, day): un solo par entrada/salida por
 -- día. El personal con horario cortado ficha más de una vez por día, así que
 -- se saca. `day` se queda: se sigue usando para filtrar y agrupar.
+--
+-- Se borra de las dos formas posibles: si se creó como constraint de tabla,
+-- lo saca el DROP CONSTRAINT; si en algún momento se creó como un índice
+-- único suelto (por ejemplo a mano desde el Table Editor), DROP CONSTRAINT
+-- no lo ve y no hace nada — Postgres reporta el mismo error de "unique
+-- constraint" para ambos casos, así que sin esta segunda línea la restricción
+-- podía seguir viva aunque este archivo ya se hubiera corrido.
 alter table public.punches drop constraint if exists punches_employee_id_day_key;
+drop index if exists public.punches_employee_id_day_key;
 
 comment on column public.punches.edited is
   'true si un administrador creó o corrigió el registro a mano desde el panel.';

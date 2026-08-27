@@ -10,7 +10,7 @@ import { readSession } from '@/lib/session'
 export const dynamic = 'force-dynamic'
 
 export const metadata = {
-  title: 'Panel MAGA · Administración',
+  title: 'Panel - El Pirata VCP · Administración',
   robots: { index: false, follow: false },
 }
 

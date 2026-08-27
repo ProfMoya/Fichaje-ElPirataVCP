@@ -48,9 +48,7 @@ function alFallar(error: unknown): { ok: false; message: string } {
 
 async function ipKey(prefix: string): Promise<string> {
   const h = await headers()
-  const ip = (h.get('x-nf-client-connection-ip') ?? h.get('x-forwarded-for') ?? 'local')
-    .split(',')[0]
-    .trim()
+  const ip = (h.get('x-forwarded-for') ?? 'local').split(',')[0].trim()
   return `${prefix}:${ip}`
 }
 
@@ -155,13 +153,13 @@ export async function cargarPanel(filtro: PanelFilter = {}): Promise<Result<Pane
     const monthStart = startOfMonthKey(dayKey)
     const desdeResumen = weekStart < monthStart ? weekStart : monthStart
 
-    const [employees, punches, adjustments, today, recientes, punchesResumen, adjustmentsResumen] =
+    const [employees, punches, adjustments, today, pendientes, punchesResumen, adjustmentsResumen] =
       await Promise.all([
         repo.listEmployees(),
         repo.listPunches({ employeeId: filtro.employeeId, from, to }),
         repo.listAdjustments({ employeeId: filtro.employeeId, from, to }),
         repo.listPunches({ from: dayKey, to: dayKey }),
-        repo.listPunches({ from: addDaysToKey(dayKey, -30), to: addDaysToKey(dayKey, -1) }),
+        repo.listDanglingPunches(dayKey),
         repo.listPunches({ from: desdeResumen, to: dayKey, limit: 5000 }),
         repo.listAdjustments({ from: desdeResumen, to: dayKey }),
       ])
@@ -171,7 +169,7 @@ export async function cargarPanel(filtro: PanelFilter = {}): Promise<Result<Pane
       punches,
       adjustments,
       today,
-      pendientes: recientes.filter((p) => p.out === null),
+      pendientes,
       resumenGeneral: { punches: punchesResumen, adjustments: adjustmentsResumen },
       dayKey,
       nowMin: minutes,
@@ -192,10 +190,16 @@ function validarEmpleado(name: string, pin: string | undefined, requierePin: boo
   return null
 }
 
+// numeric(10,2) en la base: 8 dígitos enteros como máximo.
+const MONTO_MAXIMO = 99_999_999
+
 function validarSalario(hourlyWage: number | undefined): string | null {
   if (hourlyWage === undefined) return null
   if (!Number.isFinite(hourlyWage) || hourlyWage < 0) {
     return 'El salario por hora tiene que ser un número mayor o igual a 0.'
+  }
+  if (hourlyWage > MONTO_MAXIMO) {
+    return `El salario por hora no puede superar $${MONTO_MAXIMO.toLocaleString('es-AR')}.`
   }
   return null
 }
@@ -354,6 +358,9 @@ export async function crearAjuste(input: NuevaCompensacion): Promise<Result<Adju
     if (!Number.isFinite(input.amount) || input.amount <= 0) {
       return fallo('El monto tiene que ser un número mayor a 0.')
     }
+    if (input.amount > MONTO_MAXIMO) {
+      return fallo(`El monto no puede superar $${MONTO_MAXIMO.toLocaleString('es-AR')}.`)
+    }
 
     const adjustment = await repo.createAdjustment({
       employeeId: input.employeeId,
@@ -390,6 +397,13 @@ export type CierreMes = {
   adjustments: Adjustment[]
 }
 
+// Tope de fichajes que se pueden exportar con garantías en un solo cierre.
+// Si un mes lo supera, el archivo descargado sería un recorte silencioso de
+// lo que en realidad había — y el borrado de la base no respeta ese mismo
+// tope, así que se perderían registros que nunca llegaron al archivo.
+// Mejor abortar el cierre entero (sin borrar nada) que arriesgar eso.
+const LIMITE_CIERRE_MES = 10_000
+
 /**
  * Descarga todo lo del mes en curso (hasta hoy) y lo borra de la base.
  *
@@ -406,9 +420,28 @@ export async function cerrarMes(): Promise<Result<CierreMes>> {
 
     const [employees, punches, adjustments] = await Promise.all([
       repo.listEmployees(),
-      repo.listPunches({ from, to, limit: 10000 }),
+      repo.listPunches({ from, to, limit: LIMITE_CIERRE_MES + 1 }),
       repo.listAdjustments({ from, to }),
     ])
+
+    if (punches.length > LIMITE_CIERRE_MES) {
+      return fallo(
+        `Este mes tiene más de ${LIMITE_CIERRE_MES.toLocaleString('es-AR')} fichajes — son demasiados para cerrar de una sola vez sin arriesgar que el archivo descargado quede incompleto. No se borró nada; contactá a soporte para cerrarlo en partes.`,
+      )
+    }
+
+    // Cerrar el mes con alguien todavía sin fichar la salida deja ese
+    // fichaje afuera de los totales para siempre: mejor frenar acá que
+    // archivar un mes que ya se sabe incompleto.
+    const enCurso = punches.filter((p) => p.out === null)
+    if (enCurso.length > 0) {
+      const nombrePorId = new Map(employees.map((e) => [e.id, e.name]))
+      const nombres = [...new Set(enCurso.map((p) => nombrePorId.get(p.employeeId) ?? 'un empleado eliminado'))]
+      const listado = nombres.length <= 3 ? nombres.join(', ') : `${nombres.slice(0, 3).join(', ')} y ${nombres.length - 3} más`
+      return fallo(
+        `No se puede cerrar el mes: todavía hay fichajes sin hora de salida (${listado}). Corregilos desde Historial antes de intentar de nuevo.`,
+      )
+    }
 
     await Promise.all([repo.deletePunchesInRange(from, to), repo.deleteAdjustmentsInRange(from, to)])
 

@@ -43,6 +43,7 @@ import {
 import { Aviso, Boton, Field, Modal, Panel, Select, Stat, StatusPill, Table } from '@/components/admin/ui'
 import {
   buildPayrollSummary,
+  crossesMidnight,
   estimatedPay,
   formatCurrency,
   formatDecimalHours,
@@ -51,6 +52,7 @@ import {
   formatShortDate,
   formatTimeLabel,
   formatWeekday,
+  parseTimeInput,
   toTimeInput,
   workedMinutes,
   type Adjustment,
@@ -60,9 +62,12 @@ import {
 } from '@/lib/timeclock'
 import { cn } from '@/lib/utils'
 import { startOfMonthKey, startOfWeekKey } from '@/lib/tz'
-import jsPDF from 'jspdf'
-import autoTable from 'jspdf-autotable'
-import * as XLSX from 'xlsx'
+
+// jspdf + jspdf-autotable + xlsx pesan ~775 KB sin comprimir entre las tres.
+// Se usan solo en exportar PDF y en cerrar el mes — importarlas acá arriba
+// las metería en el bundle inicial de /admin aunque el admin nunca haga clic
+// en esos botones. Se cargan bajo demanda, dentro de las funciones que las
+// necesitan.
 
 type Tab = 'resumen' | 'empleados' | 'historial' | 'compensaciones' | 'cuenta'
 
@@ -79,6 +84,16 @@ const TIPO_AJUSTE: Record<Adjustment['kind'], string> = {
   deduction: 'Descuento',
 }
 
+/** Tope de la columna numeric(10,2) en la base: pasado esto, la tarjeta de
+ * costo estimado desborda su ancho y el guardado en Supabase falla. */
+const MONTO_MAXIMO = 99_999_999
+
+/** Corta un monto tipeado en el input al tope de la columna antes de que llegue al servidor. */
+function limitarMonto(value: string): string {
+  const n = Number(value)
+  return value !== '' && Number.isFinite(n) && n > MONTO_MAXIMO ? String(MONTO_MAXIMO) : value
+}
+
 function nombreArchivoCierre(month: string): string {
   return `cierre-${month}.xlsx`
 }
@@ -88,7 +103,9 @@ function nombreArchivoCierre(month: string): string {
  * Resumen por empleado) y lo descarga. Se abre nativo en Excel y en Google
  * Sheets (Archivo › Importar, o arrastrándolo directo a Drive).
  */
-function descargarCierreMes(cierre: CierreMes) {
+async function descargarCierreMes(cierre: CierreMes) {
+  const XLSX = await import('xlsx')
+
   const nombrePorId = new Map(cierre.employees.map((e) => [e.id, e.name]))
   const nombre = (id: string) => nombrePorId.get(id) ?? 'Empleado eliminado'
 
@@ -243,7 +260,7 @@ export function AdminDashboard({
           setNota({ tipo: 'error', texto: res.message })
           return
         }
-        descargarCierreMes(res.data)
+        await descargarCierreMes(res.data)
         const recarga = await cargarPanel(filtro)
         if (recarga.ok) setData(recarga.data)
         setNota({ tipo: 'exito', texto: `Mes cerrado. Se descargó ${nombreArchivoCierre(res.data.month)}.` })
@@ -272,8 +289,8 @@ export function AdminDashboard({
             <ArrowLeft className="size-5" strokeWidth={1.6} />
           </Link>
           <div className="leading-tight">
-            <h1 className="text-xl font-light tracking-tight sm:text-2xl">Panel MAGA</h1>
-            <p className="text-xs font-light tracking-wide text-muted-foreground">
+            <h1 className="text-xl font-light tracking-tight sm:text-2xl">Panel - El Pirata VCP</h1>
+            <p className="text-sm font-light tracking-wide text-muted-foreground">
               {formatLongDate(data.dayKey)} · {username}
             </p>
           </div>
@@ -342,7 +359,7 @@ export function AdminDashboard({
       )}
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <Stat icon={<Users className="size-4" />} label="Empleados activos" value={`${activos}`} />
+        <Stat icon={<Users className="size-4" />} label="Empleados registrados" value={`${activos}`} />
         <Stat icon={<LogIn className="size-4" />} label="Dentro ahora" value={`${dentroAhora}`} highlight />
         <Stat icon={<LogIn className="size-4" />} label="Entradas hoy" value={`${data.today.length}`} />
         <Stat icon={<LogOut className="size-4" />} label="Salidas hoy" value={`${salidasHoy}`} />
@@ -354,14 +371,14 @@ export function AdminDashboard({
         />
       </section>
 
-      <nav className="glass flex w-full gap-1 rounded-full p-1.5 sm:w-fit">
+      <nav className="flex w-full gap-1 rounded-2xl border border-primary/20 bg-surface p-1.5 shadow-lg shadow-black/20 sm:w-fit">
         {TABS.map((t) => (
           <button
             key={t.id}
             type="button"
             onClick={() => setTab(t.id)}
             className={cn(
-              'flex-1 rounded-full px-3 py-2 text-sm font-light tracking-wide whitespace-nowrap transition-all duration-200 sm:flex-none sm:px-6',
+              'flex-1 rounded-xl px-3 py-2.5 text-sm font-medium tracking-[0.14em] whitespace-nowrap uppercase transition-all duration-200 sm:flex-none sm:px-6',
               tab === t.id
                 ? 'bg-primary/15 text-primary shadow-[inset_0_0_0_1px_oklch(0.72_0.168_245/45%)]'
                 : 'text-muted-foreground hover:text-foreground',
@@ -460,14 +477,29 @@ export function AdminDashboard({
           hoy={data.dayKey}
           cargando={cargando}
           onClose={() => setEditor(null)}
-          onGuardar={async (input) => {
-            const ok = await ejecutar(
-              () => guardarFichaje(input),
-              editor.punch ? 'Fichaje corregido.' : 'Fichaje cargado.',
-            )
-            if (ok) setEditor(null)
-            return ok
-          }}
+          onGuardar={(input) =>
+            new Promise<{ ok: boolean; message?: string }>((resolve) => {
+              startTransition(async () => {
+                try {
+                  const res = await guardarFichaje(input)
+                  if (!res.ok) {
+                    resolve({ ok: false, message: res.message })
+                    return
+                  }
+                  const recarga = await cargarPanel(filtro)
+                  if (recarga.ok) setData(recarga.data)
+                  setNota({ tipo: 'exito', texto: editor.punch ? 'Fichaje corregido.' : 'Fichaje cargado.' })
+                  setEditor(null)
+                  resolve({ ok: true })
+                } catch {
+                  resolve({
+                    ok: false,
+                    message: 'Se perdió la conexión con el servidor. Reintentá en unos segundos.',
+                  })
+                }
+              })
+            })
+          }
         />
       )}
 
@@ -524,21 +556,25 @@ function TabResumen({
   const weekStart = startOfWeekKey(data.dayKey)
   const monthStart = startOfMonthKey(data.dayKey)
 
-  const punchesSemana = data.resumenGeneral.punches.filter((p) => p.day >= weekStart)
-  const punchesMes = data.resumenGeneral.punches.filter((p) => p.day >= monthStart)
-  const adjustmentsMes = data.resumenGeneral.adjustments.filter((a) => a.day >= monthStart)
+  const { horasSemana, horasMes, costoMes, netoCompensacionesMes, topEmpleados } = useMemo(() => {
+    const punchesSemana = data.resumenGeneral.punches.filter((p) => p.day >= weekStart)
+    const punchesMes = data.resumenGeneral.punches.filter((p) => p.day >= monthStart)
+    const adjustmentsMes = data.resumenGeneral.adjustments.filter((a) => a.day >= monthStart)
 
-  const horasSemana = punchesSemana.reduce((acc, p) => acc + workedMinutes(p, data.nowMin, p.day === data.dayKey), 0)
-  const horasMes = punchesMes.reduce((acc, p) => acc + workedMinutes(p, data.nowMin, p.day === data.dayKey), 0)
+    const horasSemana = punchesSemana.reduce((acc, p) => acc + workedMinutes(p, data.nowMin, p.day === data.dayKey), 0)
+    const horasMes = punchesMes.reduce((acc, p) => acc + workedMinutes(p, data.nowMin, p.day === data.dayKey), 0)
 
-  const payrollMes = buildPayrollSummary(data.employees, punchesMes, adjustmentsMes, data.dayKey, data.nowMin)
-  const costoMes = payrollMes.reduce((acc, r) => acc + r.total, 0)
-  const netoCompensacionesMes = payrollMes.reduce((acc, r) => acc + r.bonus - r.deduction, 0)
-  const topEmpleados = [...payrollMes].sort((a, b) => b.minutes - a.minutes).slice(0, 5)
+    const payrollMes = buildPayrollSummary(data.employees, punchesMes, adjustmentsMes, data.dayKey, data.nowMin)
+    const costoMes = payrollMes.reduce((acc, r) => acc + r.total, 0)
+    const netoCompensacionesMes = payrollMes.reduce((acc, r) => acc + r.bonus - r.deduction, 0)
+    const topEmpleados = [...payrollMes].sort((a, b) => b.minutes - a.minutes).slice(0, 5)
+
+    return { horasSemana, horasMes, costoMes, netoCompensacionesMes, topEmpleados }
+  }, [data.resumenGeneral, data.employees, data.dayKey, data.nowMin, weekStart, monthStart])
 
   return (
     <>
-      <Panel title="Este mes, de un vistazo">
+      <Panel title="Este mes, de un vistazo" hint="totales de horas y costo estimado del mes en curso">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Stat
             icon={<CalendarRange className="size-4" />}
@@ -561,7 +597,7 @@ function TabResumen({
       </Panel>
 
       {topEmpleados.length > 0 && (
-        <Panel title="Top empleados del mes">
+        <Panel title="Top empleados del mes" hint="quiénes hicieron más horas este mes">
           <Table
             head={['Empleado', 'Horas', 'Costo estimado']}
             rows={topEmpleados.map((r) => [
@@ -580,7 +616,10 @@ function TabResumen({
       )}
 
       {data.pendientes.length > 0 && (
-        <Panel title={`Jornadas sin cerrar · ${data.pendientes.length}`}>
+        <Panel
+          title={`Jornadas sin cerrar · ${data.pendientes.length}`}
+          hint="fichajes de días anteriores a los que les falta la salida"
+        >
           <Table
             head={['Empleado', 'Fecha', 'Entrada', 'Salida', '']}
             rows={data.pendientes.map((p) => [
@@ -589,12 +628,12 @@ function TabResumen({
                 {formatWeekday(p.day)} {formatShortDate(p.day)}
               </span>,
               <span key="i" className="tnum font-mono">{formatTimeLabel(p.in)}</span>,
-              <span key="o" className="text-xs font-light text-destructive/90">Falta</span>,
+              <span key="o" className="text-sm font-light text-destructive/90">Falta</span>,
               <div key="a" className="flex justify-end">
                 <button
                   type="button"
                   onClick={() => onEditar(p)}
-                  className="rounded-lg px-3 py-1.5 text-xs font-light text-primary transition-colors hover:underline"
+                  className="rounded-lg px-3 py-1.5 text-sm font-light text-primary transition-colors hover:underline"
                 >
                   Corregir
                 </button>
@@ -604,7 +643,10 @@ function TabResumen({
         </Panel>
       )}
 
-      <Panel title={`Movimientos de hoy · ${formatLongDate(data.dayKey)}`}>
+      <Panel
+        title={`Movimientos de hoy · ${formatLongDate(data.dayKey)}`}
+        hint="entradas y salidas registradas hoy"
+      >
         <Table
           head={['Empleado', 'Entrada', 'Salida', 'Trabajado', 'Estado', '']}
           rows={[...data.today]
@@ -672,15 +714,16 @@ function TabEmpleados({
 
   return (
     <>
-      <Panel title="Alta de empleado">
+      <Panel title="Alta de empleado" hint="cargar un empleado nuevo" variant="warning">
         <form onSubmit={alta} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_0.6fr_auto]">
           <Field label="Nombre y apellido" value={name} onChange={setName} placeholder="Ana Gutiérrez" />
           <Field
             label="Salario por hora"
             type="number"
             value={hourlyWage}
-            onChange={setHourlyWage}
+            onChange={(v) => setHourlyWage(limitarMonto(v))}
             placeholder="0"
+            max={MONTO_MAXIMO}
             mono
           />
           <Field label="Sector" value={department} onChange={setDepartment} placeholder="Producción" />
@@ -699,13 +742,13 @@ function TabEmpleados({
             </Boton>
           </div>
         </form>
-        <p className="mt-4 text-xs font-light text-muted-foreground/70">
+        <p className="mt-4 text-sm font-light text-muted-foreground/70">
           El PIN se guarda cifrado y no se puede volver a ver: si un empleado lo olvida, se le asigna uno nuevo desde
           esta misma tabla.
         </p>
       </Panel>
 
-      <Panel title={`Empleados · ${data.employees.length}`}>
+      <Panel title={`Empleados · ${data.employees.length}`} hint="listado, edición y baja del personal">
         <Table
           head={['Empleado', 'Salario/hora', 'Sector', 'Estado', '']}
           rows={data.employees.map((e) => [
@@ -717,7 +760,7 @@ function TabEmpleados({
             e.active ? (
               <StatusPill key="s" open={dentro(e.id)} />
             ) : (
-              <span key="s" className="text-xs font-light text-destructive/90">De baja</span>
+              <span key="s" className="text-sm font-light text-destructive/90">De baja</span>
             ),
             <div key="a" className="flex justify-end gap-1">
               <button
@@ -737,7 +780,7 @@ function TabEmpleados({
                     e.active ? `${e.name} quedó de baja.` : `${e.name} fue reactivado.`,
                   )
                 }
-                className="rounded-lg px-2 py-1 text-xs font-light text-muted-foreground transition-colors hover:text-primary"
+                className="rounded-lg px-2 py-1 text-sm font-light text-muted-foreground transition-colors hover:text-primary"
               >
                 {e.active ? 'Dar de baja' : 'Reactivar'}
               </button>
@@ -806,7 +849,14 @@ function EditorEmpleadoModal({
       >
         <Field label="Nombre y apellido" value={name} onChange={setName} autoFocus />
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Salario por hora" type="number" value={hourlyWage} onChange={setHourlyWage} mono />
+          <Field
+            label="Salario por hora"
+            type="number"
+            value={hourlyWage}
+            onChange={(v) => setHourlyWage(limitarMonto(v))}
+            max={MONTO_MAXIMO}
+            mono
+          />
           <Field label="Sector" value={department} onChange={setDepartment} />
         </div>
         <Field
@@ -858,6 +908,12 @@ function TabHistorial({
     0,
   )
 
+  // Un fichaje sin salida en este rango deja el archivo exportado incompleto
+  // para siempre: mejor bloquear la descarga que dejar salir un número que
+  // después no coincide con lo que se cobró.
+  const abiertos = data.punches.filter((p) => p.out === null)
+  const bloqueadoPorAbiertos = abiertos.length > 0
+
   const wagePorId = useMemo(() => {
     const map = new Map(data.employees.map((e) => [e.id, e.hourlyWage]))
     return (id: string) => map.get(id) ?? 0
@@ -897,12 +953,17 @@ function TabHistorial({
     URL.revokeObjectURL(url)
   }
 
-  function exportarPdf() {
+  async function exportarPdf() {
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable'),
+    ])
+
     const doc = new jsPDF()
     const rango = `${filtro.from ?? 'inicio'} a ${filtro.to ?? data.dayKey}`
 
     doc.setFontSize(14)
-    doc.text('Fichaje MAGA · Historial', 14, 16)
+    doc.text('Fichaje - El Pirata VCP · Historial', 14, 16)
     doc.setFontSize(9)
     doc.setTextColor(120)
     doc.text(rango, 14, 22)
@@ -964,7 +1025,10 @@ function TabHistorial({
 
   return (
     <>
-      <Panel title={`Resumen de sueldos · ${formatCurrency(totalEstimado)}`}>
+      <Panel
+        title={`Resumen de sueldos · ${formatCurrency(totalEstimado)}`}
+        hint="estimación de costo laboral del rango filtrado"
+      >
         {resumen.length === 0 ? (
           <p className="py-6 text-center text-sm font-light text-muted-foreground">
             No hay horas ni compensaciones en este rango todavía.
@@ -1008,17 +1072,26 @@ function TabHistorial({
 
       <Panel
         title={`Historial · ${data.punches.length} registros · ${formatDuration(total)}`}
+        hint="todos los fichajes del rango, filtrables y exportables"
         action={
           <div className="flex flex-wrap gap-2">
             <Boton onClick={onNuevo} className="px-4 py-2">
               <CalendarPlus className="size-4" strokeWidth={1.6} />
               Cargar fichaje
             </Boton>
-            <Boton onClick={exportarCsv} disabled={data.punches.length === 0} className="px-4 py-2">
+            <Boton
+              onClick={exportarCsv}
+              disabled={data.punches.length === 0 || bloqueadoPorAbiertos}
+              className="px-4 py-2"
+            >
               <Download className="size-4" strokeWidth={1.6} />
               Exportar CSV
             </Boton>
-            <Boton onClick={exportarPdf} disabled={data.punches.length === 0} className="px-4 py-2">
+            <Boton
+              onClick={exportarPdf}
+              disabled={data.punches.length === 0 || bloqueadoPorAbiertos}
+              className="px-4 py-2"
+            >
               <FileText className="size-4" strokeWidth={1.6} />
               Exportar PDF
             </Boton>
@@ -1029,6 +1102,15 @@ function TabHistorial({
           </div>
         }
       >
+        {bloqueadoPorAbiertos && (
+          <Aviso tipo="info">
+            No se puede exportar mientras haya fichajes sin salida en este rango:{' '}
+            {[...new Set(abiertos.map((p) => nombrePorId(p.employeeId)))].join(', ')}. Esperá a que fichen la
+            salida o corregilo desde la tabla de abajo. El cierre de mes tiene la misma restricción, pero se
+            evalúa sobre el mes en curso, no sobre este filtro.
+          </Aviso>
+        )}
+
         <form
         className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_auto]"
         onSubmit={(e) => {
@@ -1074,7 +1156,7 @@ function TabHistorial({
             {nombrePorId(p.employeeId)}
             {p.edited && (
               <span
-                className="ml-2 rounded-full bg-foreground/5 px-2 py-0.5 text-[0.6rem] tracking-wider text-muted-foreground uppercase"
+                className="ml-2 rounded-full bg-foreground/5 px-2 py-0.5 text-sm tracking-wider text-muted-foreground uppercase"
                 title={p.note ?? 'Cargado o corregido desde el panel'}
               >
                 corregido
@@ -1159,7 +1241,7 @@ function TabCompensaciones({
 
   return (
     <>
-      <Panel title="Nueva compensación">
+      <Panel title="Nueva compensación" hint="cargar un bono o un descuento">
         <form onSubmit={alta} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[1.3fr_1fr_0.8fr_0.9fr_1.3fr_auto]">
           <Select label="Empleado" value={employeeId} onChange={setEmployeeId}>
             <option value="">Elegí un empleado…</option>
@@ -1174,7 +1256,15 @@ function TabCompensaciones({
             <option value="bonus">{TIPO_AJUSTE.bonus}</option>
             <option value="deduction">{TIPO_AJUSTE.deduction}</option>
           </Select>
-          <Field label="Monto" type="number" value={amount} onChange={setAmount} placeholder="0" mono />
+          <Field
+            label="Monto"
+            type="number"
+            value={amount}
+            onChange={(v) => setAmount(limitarMonto(v))}
+            placeholder="0"
+            max={MONTO_MAXIMO}
+            mono
+          />
           <Field label="Fecha" type="date" value={day} onChange={setDay} />
           <Field
             label="Nota"
@@ -1189,15 +1279,16 @@ function TabCompensaciones({
             </Boton>
           </div>
         </form>
-        <p className="mt-4 text-xs font-light text-muted-foreground/70">
+        <p className="mt-4 text-sm font-light text-muted-foreground/70">
           Los bonos suman y los descuentos restan del salario estimado que se ve en Historial y en el cierre de mes.
         </p>
       </Panel>
 
       <Panel
         title={`Compensaciones · ${data.adjustments.length}`}
+        hint="bonos y descuentos cargados"
         action={
-          <div className="flex gap-4 text-xs font-light text-muted-foreground">
+          <div className="flex gap-4 text-sm font-light text-muted-foreground">
             <span>
               Bonos <span className="tnum font-mono text-primary">+{formatCurrency(totalBonos)}</span>
             </span>
@@ -1217,7 +1308,7 @@ function TabCompensaciones({
             <span
               key="k"
               className={cn(
-                'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-light whitespace-nowrap',
+                'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-light whitespace-nowrap',
                 a.kind === 'bonus'
                   ? 'bg-primary/12 text-primary shadow-[inset_0_0_0_1px_oklch(0.72_0.168_245/45%)]'
                   : 'bg-destructive/10 text-destructive shadow-[inset_0_0_0_1px_oklch(0.65_0.2_25/35%)]',
@@ -1269,15 +1360,41 @@ function EditorFichajeModal({
     entrada: string
     salida: string
     nota?: string
-  }) => Promise<boolean>
+  }) => Promise<{ ok: boolean; message?: string }>
 }) {
+  const outInicial = inicial.punch?.out ?? null
+  const cruzaInicial = crossesMidnight(outInicial)
+
   const [employeeId, setEmployeeId] = useState(inicial.employeeId)
   const [day, setDay] = useState(inicial.day)
   const [entrada, setEntrada] = useState(toTimeInput(inicial.punch?.in))
-  const [salida, setSalida] = useState(toTimeInput(inicial.punch?.out))
+  const [salida, setSalida] = useState(
+    outInicial === null ? '' : toTimeInput(cruzaInicial ? outInicial - 1440 : outInicial),
+  )
+  const [cruzaDia, setCruzaDia] = useState(cruzaInicial)
   const [nota, setNota] = useState(inicial.punch?.note ?? '')
+  const [error, setError] = useState<string | null>(null)
 
   const editando = inicial.punch !== null
+
+  // Si se vacía la salida y se vuelve a tipear una sin re-tildar la casilla,
+  // "cruza el día" quedaría marcado de una corrección anterior y sumaría
+  // 1440 minutos de más sin ningún aviso.
+  function cambiarSalida(v: string) {
+    setSalida(v)
+    if (v.trim() === '') setCruzaDia(false)
+  }
+
+  async function enviar(e: React.FormEvent) {
+    e.preventDefault()
+    setError(null)
+
+    const salidaFinal =
+      salida.trim() === '' ? '' : toTimeInput((parseTimeInput(salida) ?? 0) + (cruzaDia ? 1440 : 0))
+
+    const res = await onGuardar({ id: inicial.punch?.id, employeeId, day, entrada, salida: salidaFinal, nota })
+    if (!res.ok) setError(res.message ?? 'No se pudo guardar el fichaje.')
+  }
 
   return (
     <Modal
@@ -1289,13 +1406,7 @@ function EditorFichajeModal({
       }
       onClose={onClose}
     >
-      <form
-        className="flex flex-col gap-4"
-        onSubmit={(e) => {
-          e.preventDefault()
-          void onGuardar({ id: inicial.punch?.id, employeeId, day, entrada, salida, nota })
-        }}
-      >
+      <form className="flex flex-col gap-4" onSubmit={enviar}>
         <Select label="Empleado" value={employeeId} onChange={setEmployeeId}>
           <option value="">Elegí un empleado…</option>
           {empleados.map((e) => (
@@ -1309,16 +1420,34 @@ function EditorFichajeModal({
         <Field label="Fecha" type="date" value={day} onChange={setDay} />
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Entrada" value={entrada} onChange={setEntrada} placeholder="08:30" mono />
-          <Field label="Salida" value={salida} onChange={setSalida} placeholder="17:00" mono />
+          <Field label="Entrada" type="time" value={entrada} onChange={setEntrada} mono />
+          <Field label="Salida" type="time" value={salida} onChange={cambiarSalida} mono />
         </div>
 
-        <p className="text-xs font-light text-muted-foreground/70">
-          Dejá la salida vacía para dejar la jornada abierta. Si el turno termina al día siguiente, cargá la salida
-          pasada de 24: las 01:30 del día siguiente se escriben <span className="tnum font-mono">25:30</span>.
+        <label className="flex items-center gap-2 text-sm font-light text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={cruzaDia}
+            onChange={(e) => setCruzaDia(e.target.checked)}
+            disabled={salida.trim() === ''}
+            className="size-4 rounded border-border/70 accent-primary disabled:opacity-50"
+          />
+          El turno termina al día siguiente
+        </label>
+
+        <p className="text-sm font-light text-muted-foreground/70">
+          Dejá la salida vacía para dejar la jornada abierta. Si el turno cruza la medianoche (por ejemplo, entra a
+          las 22:00 y sale a las 02:00), tildá la casilla de arriba: la salida queda guardada como{' '}
+          <span className="tnum font-mono">02:00 +1</span>.
         </p>
 
         <Field label="Nota (opcional)" value={nota} onChange={setNota} placeholder="Olvidó fichar la salida" />
+
+        {error && (
+          <Aviso tipo="error" onClose={() => setError(null)}>
+            {error}
+          </Aviso>
+        )}
 
         <div className="mt-2 flex justify-end gap-3">
           <Boton onClick={onClose}>Cancelar</Boton>
@@ -1362,7 +1491,11 @@ function TabCuenta({
   }
 
   return (
-    <Panel title={`Mi cuenta · ${username}`}>
+    <Panel
+      title={`Mi cuenta · ${username}`}
+      hint="cambiar tu contraseña de acceso al panel"
+      variant="success"
+    >
       <form onSubmit={enviar} className="flex max-w-md flex-col gap-4">
         <Field label="Contraseña actual" type="password" value={actual} onChange={setActual} />
         <Field label="Contraseña nueva" type="password" value={nueva} onChange={setNueva} />

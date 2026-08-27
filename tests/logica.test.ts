@@ -3,7 +3,8 @@ import { zonedNow, startOfWeekKey, startOfMonthKey, addDaysToKey, isValidDayKey 
 import {
   formatTime, formatTimeLabel, formatDuration, formatDecimalHours,
   parseTimeInput, toTimeInput, workedMinutes, buildSummary, isValidPin,
-  formatShortDate, formatWeekday, formatLongDate, type Punch,
+  formatShortDate, formatWeekday, formatLongDate, resolverCierre,
+  tramosDelDia, proximoTurno, type Punch,
 } from '@/lib/timeclock'
 
 let n = 0
@@ -139,6 +140,44 @@ t('horario cortado: dos tramos el mismo día se suman en el total de hoy', () =>
   assert.equal(s.todayWorked, 240 + 60)
   assert.equal(s.todayOpen, true)
   assert.equal(s.days.filter((d) => d.day === '2026-08-26').length, 2)
+})
+
+console.log('\nCIERRE DE UN TOQUE DE PIN (kiosco)')
+t('cierra normal, mismo día', () => {
+  const r = resolverCierre(p('2026-08-26', 480, null), '2026-08-26', 720)
+  assert.deepEqual(r, { action: 'cerrar', minute: 720 })
+})
+t('cruza una medianoche: entra 23:50, sale 00:10 del día siguiente', () => {
+  const r = resolverCierre(p('2026-08-25', 1430, null), '2026-08-26', 10)
+  assert.deepEqual(r, { action: 'cerrar', minute: 1450 }) // 24h + 10m desde la entrada
+})
+t('doble toque en el mismo minuto no cierra una jornada de 0', () => {
+  assert.deepEqual(resolverCierre(p('2026-08-26', 480, null), '2026-08-26', 480), { action: 'muy_pronto' })
+})
+t('doble toque cruzando la medianoche tampoco cierra en 0', () => {
+  // Entra 23:59, alguien vuelve a tocar el PIN a las 23:59:30 → mismo minuto 1439, no 00:00 del otro día.
+  assert.deepEqual(resolverCierre(p('2026-08-25', 1439, null), '2026-08-25', 1439), { action: 'muy_pronto' })
+})
+t('turno abierto hace más de un día es un olvido, no un turno en curso', () => {
+  const r = resolverCierre(p('2026-08-20', 480, null), '2026-08-26', 600)
+  assert.deepEqual(r, { action: 'abrir' })
+})
+
+console.log('\nNUMERACIÓN DE TURNOS (horario cortado)')
+t('ordena los tramos del día por hora de entrada, no por como se cargaron', () => {
+  const punches = [
+    p('2026-08-26', 840, 900), // tarde, aparece primero en el array
+    p('2026-08-26', 480, 720), // mañana
+  ]
+  assert.deepEqual(tramosDelDia(punches, '2026-08-26').map((x) => x.in), [480, 840])
+})
+t('el próximo turno es uno más que los que ya tiene ese día', () => {
+  assert.equal(proximoTurno([], '2026-08-26'), 1)
+  assert.equal(proximoTurno([p('2026-08-26', 480, 720)], '2026-08-26'), 2)
+})
+t('un fichaje de otro día no cuenta para el turno de hoy', () => {
+  const punches = [p('2026-08-25', 480, 720)]
+  assert.equal(proximoTurno(punches, '2026-08-26'), 1)
 })
 
 console.log(`\n${n} verificaciones pasaron\n`)

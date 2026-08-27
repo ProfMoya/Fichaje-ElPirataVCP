@@ -10,7 +10,16 @@ import {
   listPunchesByEmployee,
   openPunch,
 } from '@/lib/repo'
-import { buildSummary, isValidPin, formatTime, workedMinutes, type Summary } from '@/lib/timeclock'
+import {
+  buildSummary,
+  isValidPin,
+  formatTime,
+  proximoTurno,
+  resolverCierre,
+  tramosDelDia,
+  workedMinutes,
+  type Summary,
+} from '@/lib/timeclock'
 import { addDaysToKey, startOfMonthKey, zonedNow } from '@/lib/tz'
 
 /**
@@ -29,6 +38,8 @@ export type PunchOutcome =
       name: string
       minute: number
       workedToday: number
+      /** Posición del tramo dentro de los fichajes de ese empleado ese día (1, 2, ...). */
+      turno: number
     }
   | {
       ok: false
@@ -38,10 +49,15 @@ export type PunchOutcome =
 
 async function clientKey(prefix: string): Promise<string> {
   const h = await headers()
-  const ip = (h.get('x-nf-client-connection-ip') ?? h.get('x-forwarded-for') ?? 'local')
-    .split(',')[0]
-    .trim()
+  const ip = (h.get('x-forwarded-for') ?? 'local').split(',')[0].trim()
   return `${prefix}:${ip}`
+}
+
+async function abrirTurno(employeeId: string, name: string, dayKey: string, minutes: number): Promise<PunchOutcome> {
+  const deHoy = await listPunchesByEmployee(employeeId, dayKey)
+  const turno = proximoTurno(deHoy, dayKey)
+  await openPunch(employeeId, dayKey, minutes)
+  return { ok: true, kind: 'in', name, minute: minutes, workedToday: 0, turno }
 }
 
 export async function registrarFichaje(pin: string): Promise<PunchOutcome> {
@@ -80,19 +96,26 @@ export async function registrarFichaje(pin: string): Promise<PunchOutcome> {
     }
 
     const { dayKey, minutes } = zonedNow()
-    const abierto = await getOpenPunch(employee.id, dayKey)
+    const abierto = await getOpenPunch(employee.id)
 
     // Sin fichaje abierto, este toque abre uno nuevo — sin importar cuántos
     // pares entrada/salida ya se cerraron hoy: el horario cortado ficha
     // varias veces por día.
     if (!abierto) {
-      await openPunch(employee.id, dayKey, minutes)
-      return { ok: true, kind: 'in', name: employee.name, minute: minutes, workedToday: 0 }
+      return abrirTurno(employee.id, employee.name, dayKey, minutes)
     }
 
-    // Doble toque en el teclado, o alguien que ficha la entrada y se
-    // arrepiente al instante: sin este freno quedaría una jornada de 0 minutos.
-    if (minutes <= abierto.in) {
+    // El turno abierto puede venir de ayer (cruzó la medianoche, típico de
+    // un cierre de local de noche): resolverCierre decide si esto cierra el
+    // turno, si es muy pronto, o si en realidad es un olvido de hace más de
+    // un día y conviene tratarlo como si no hubiera nada abierto.
+    const resolucion = resolverCierre(abierto, dayKey, minutes)
+
+    if (resolucion.action === 'abrir') {
+      return abrirTurno(employee.id, employee.name, dayKey, minutes)
+    }
+
+    if (resolucion.action === 'muy_pronto') {
       return {
         ok: false,
         code: 'muy_pronto',
@@ -100,14 +123,17 @@ export async function registrarFichaje(pin: string): Promise<PunchOutcome> {
       }
     }
 
-    await closePunch(abierto.id, minutes)
+    await closePunch(abierto.id, resolucion.minute)
 
-    // El total de hoy suma todos los tramos del día, no solo el que se
-    // acaba de cerrar.
-    const deHoy = await listPunchesByEmployee(employee.id, dayKey)
-    const workedToday = deHoy.reduce((acc, p) => acc + workedMinutes(p, minutes, true), 0)
+    // El total del turno suma todos los tramos de ese día, no solo el que
+    // se acaba de cerrar (por si hubo horario cortado); el número de turno
+    // sale de la misma lista, ordenada por hora de entrada.
+    const delTurno = await listPunchesByEmployee(employee.id, abierto.day)
+    const tramos = tramosDelDia(delTurno, abierto.day)
+    const workedToday = tramos.reduce((acc, p) => acc + workedMinutes(p, resolucion.minute, true), 0)
+    const turno = tramos.findIndex((p) => p.id === abierto.id) + 1
 
-    return { ok: true, kind: 'out', name: employee.name, minute: minutes, workedToday }
+    return { ok: true, kind: 'out', name: employee.name, minute: minutes, workedToday, turno }
   } catch (error) {
     return { ok: false, code: 'servidor', message: serverMessage(error) }
   }

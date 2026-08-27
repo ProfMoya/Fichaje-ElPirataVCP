@@ -60,7 +60,7 @@ export function HoursPanel({
         </button>
 
         <header className="flex flex-col gap-1 pr-12">
-          <p className="text-xs tracking-[0.3em] text-primary uppercase">Mis horas</p>
+          <p className="text-sm tracking-[0.3em] text-primary uppercase">Mis horas</p>
           <h2 className="text-2xl font-light tracking-tight sm:text-3xl">{name}</h2>
           <p className="text-sm font-light text-muted-foreground">
             {department} · {formatLongDate(dayKey)}
@@ -98,7 +98,7 @@ export function HoursPanel({
         </section>
 
         <section className="mt-7">
-          <h3 className="mb-3 text-xs tracking-[0.28em] text-muted-foreground uppercase">
+          <h3 className="mb-3 text-sm tracking-[0.28em] text-muted-foreground uppercase">
             Últimos registros
           </h3>
           {summary.days.length === 0 ? (
@@ -109,7 +109,7 @@ export function HoursPanel({
             <ul className="max-h-56 overflow-y-auto rounded-xl border border-border/70">
               {summary.days.map((d) => (
                 <li
-                  key={d.day}
+                  key={`${d.day}-${d.in}`}
                   className="flex items-center justify-between gap-3 border-b border-border/50 px-4 py-3 text-sm last:border-b-0"
                 >
                   <span className="w-28 font-light text-muted-foreground">
@@ -125,7 +125,7 @@ export function HoursPanel({
               ))}
             </ul>
           )}
-          <p className="mt-3 text-xs font-light text-muted-foreground/70">
+          <p className="mt-3 text-sm font-light text-muted-foreground/70">
             Si ves un día sin cerrar o un horario que no corresponde, pedile al administrador que lo corrija.
           </p>
         </section>
@@ -151,7 +151,7 @@ function Stat({
     <div className={`glass rounded-2xl p-4 ${highlight ? 'border-primary/45 glow-edge' : ''}`}>
       <div className="flex items-center gap-2 text-muted-foreground">
         <span className={highlight ? 'text-primary' : ''}>{icon}</span>
-        <span className="text-xs tracking-[0.18em] uppercase">{label}</span>
+        <span className="text-sm tracking-[0.18em] uppercase">{label}</span>
       </div>
       <p
         className={`tnum mt-2 font-mono text-2xl ${

@@ -107,6 +107,7 @@ export default function KioskPage() {
           kind: res.kind,
           minute: res.minute,
           workedToday: res.workedToday,
+          turno: res.turno,
         })
         setPin('')
         clearTimer()
@@ -134,12 +135,12 @@ export default function KioskPage() {
     <main className="relative z-10 flex min-h-dvh flex-col px-5 pb-10 sm:px-8">
       <header className="flex items-center justify-between py-6">
         <div className="flex items-center gap-3">
-          <span className="glass flex size-10 items-center justify-center overflow-hidden rounded-xl">
+          <span className="glass flex size-16 items-center justify-center overflow-hidden rounded-xl">
             <Image src="/Logopirata.png" alt="El Pirata Villa Carlos Paz" width={249} height={242} className="size-full object-cover" priority />
           </span>
           <div className="leading-tight">
-            <p className="text-sm font-medium tracking-wide">Fichaje MAGA</p>
-            <p className="text-xs font-light tracking-[0.22em] text-muted-foreground uppercase">
+            <p className="text-sm font-medium tracking-wide">Fichaje - El Pirata VCP</p>
+            <p className="text-sm font-light tracking-[0.22em] text-muted-foreground uppercase">
               Terminal 01
             </p>
           </div>

@@ -8,17 +8,32 @@ import { cn } from '@/lib/utils'
 
 export function Panel({
   title,
+  hint,
   action,
+  variant,
   children,
 }: {
   title: string
+  /** Explicación breve de qué hace la tarjeta, se muestra entre paréntesis junto al título. */
+  hint?: string
   action?: React.ReactNode
+  /** Resalta la tarjeta cuando conviene diferenciarla del resto del panel. */
+  variant?: 'warning' | 'success'
   children: React.ReactNode
 }) {
   return (
-    <section className="glass animate-rise rounded-3xl p-5 sm:p-7">
+    <section
+      className={cn(
+        'glass animate-rise rounded-3xl p-5 sm:p-7',
+        variant === 'warning' && 'border-warning/50 glow-edge-warning',
+        variant === 'success' && 'border-success/50 glow-edge-success',
+      )}
+    >
       <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-xs tracking-[0.28em] text-muted-foreground uppercase">{title}</h2>
+        <h2 className="text-sm tracking-[0.28em] text-muted-foreground uppercase">
+          {title}
+          {hint && <span className="ml-2 font-light normal-case tracking-normal text-muted-foreground/50">({hint})</span>}
+        </h2>
         {action}
       </div>
       {children}
@@ -40,12 +55,17 @@ export function Stat({
   className?: string
 }) {
   return (
-    <div className={cn('glass rounded-2xl p-4', highlight && 'border-primary/45 glow-edge', className)}>
+    <div className={cn('glass min-w-0 rounded-2xl p-4', highlight && 'border-primary/45 glow-edge', className)}>
       <div className="flex items-center gap-2 text-muted-foreground">
         <span className={highlight ? 'text-primary' : ''}>{icon}</span>
-        <span className="text-[0.68rem] tracking-[0.18em] uppercase">{label}</span>
+        <span className="text-sm tracking-[0.18em] uppercase">{label}</span>
       </div>
-      <p className={cn('tnum mt-2 font-mono text-3xl font-light', highlight && 'text-primary text-glow')}>
+      <p
+        className={cn(
+          'tnum mt-2 font-mono text-3xl font-light [overflow-wrap:anywhere]',
+          highlight && 'text-primary text-glow',
+        )}
+      >
         {value}
       </p>
     </div>
@@ -56,7 +76,7 @@ export function StatusPill({ open, label }: { open: boolean; label?: string }) {
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-light whitespace-nowrap',
+        'inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm font-light whitespace-nowrap',
         open
           ? 'bg-primary/12 text-primary shadow-[inset_0_0_0_1px_oklch(0.72_0.168_245/45%)]'
           : 'bg-foreground/5 text-muted-foreground shadow-[inset_0_0_0_1px_oklch(1_0_0/8%)]',
@@ -116,7 +136,7 @@ export function Table({ head, rows }: { head: string[]; rows: React.ReactNode[][
               <th
                 key={i}
                 className={cn(
-                  'border-b border-border/70 pb-3 text-left text-[0.68rem] font-normal tracking-[0.18em] text-muted-foreground uppercase',
+                  'border-b border-border/70 pb-3 text-left text-sm font-normal tracking-[0.18em] text-muted-foreground uppercase',
                   i === head.length - 1 && h === '' && 'text-right',
                 )}
               >
@@ -158,6 +178,7 @@ export function Field({
   mono,
   inputMode,
   maxLength,
+  max,
   autoFocus,
 }: {
   label?: string
@@ -168,6 +189,7 @@ export function Field({
   mono?: boolean
   inputMode?: 'text' | 'numeric'
   maxLength?: number
+  max?: number
   autoFocus?: boolean
 }) {
   const [visible, setVisible] = useState(false)
@@ -176,7 +198,7 @@ export function Field({
   return (
     <label className="flex flex-col gap-1.5">
       {label && (
-        <span className="text-[0.68rem] tracking-[0.18em] text-muted-foreground uppercase">{label}</span>
+        <span className="text-sm tracking-[0.18em] text-muted-foreground uppercase">{label}</span>
       )}
       <div className="relative">
         <input
@@ -186,12 +208,13 @@ export function Field({
           placeholder={placeholder}
           inputMode={inputMode}
           maxLength={maxLength}
+          max={max}
           autoFocus={autoFocus}
           className={cn(
             'glass w-full rounded-xl px-4 py-3 text-sm font-light text-foreground transition-all duration-200 placeholder:text-muted-foreground/70 focus:border-primary/60 focus:glow-edge focus:outline-none',
             esPassword && 'pr-11',
             mono && 'tnum font-mono',
-            type === 'date' &&
+            (type === 'date' || type === 'time') &&
               '[&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:invert',
           )}
         />
@@ -225,7 +248,7 @@ export function Select({
   return (
     <label className="flex flex-col gap-1.5">
       {label && (
-        <span className="text-[0.68rem] tracking-[0.18em] text-muted-foreground uppercase">{label}</span>
+        <span className="text-sm tracking-[0.18em] text-muted-foreground uppercase">{label}</span>
       )}
       <select
         value={value}
@@ -288,10 +311,18 @@ export function Modal({
 }) {
   const ref = useRef<HTMLButtonElement>(null)
 
+  // Aparte del listener de Escape: `onClose` llega como una función nueva en
+  // cada render del padre, y si el foco inicial dependiera de ese efecto se
+  // le robaría el foco a un campo en el que el admin está escribiendo cada
+  // vez que el padre se vuelve a renderizar (por ejemplo, al tipear en otro
+  // formulario mientras esta modal sigue abierta).
+  useEffect(() => {
+    ref.current?.focus()
+  }, [])
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', onKey)
-    ref.current?.focus()
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 

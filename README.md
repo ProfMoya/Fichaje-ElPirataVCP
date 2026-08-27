@@ -1,4 +1,4 @@
-# Fichaje MAGA
+# Fichaje - El Pirata VCP
 
 Terminal de fichaje con PIN y panel de administración, para registrar entradas
 y salidas del personal.

@@ -21,7 +21,7 @@ export function db(): SupabaseClient {
   if (!client) {
     client = createClient(env.supabaseUrl, env.supabaseServiceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
-      global: { headers: { 'x-application-name': 'fichaje-maga' } },
+      global: { headers: { 'x-application-name': 'fichaje-el-pirata-vcp' } },
     })
   }
   return client

@@ -14,7 +14,7 @@ import { env } from '@/lib/env'
  * servidor firma y verifica.
  */
 
-const COOKIE = 'maga_session'
+const COOKIE = 'elpiratavcp_session'
 const MAX_AGE_SECONDS = 8 * 60 * 60 // una jornada
 
 export type Session = {

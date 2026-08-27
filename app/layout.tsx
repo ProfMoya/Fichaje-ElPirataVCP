@@ -15,26 +15,13 @@ const mono = JetBrains_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'Fichaje MAGA · Control horario',
+  title: 'Fichaje - El Pirata VCP · Control horario',
   description:
     'Sistema de registro de entrada y salida de personal. Terminal de fichaje con PIN, consulta de horas y panel de administración.',
   robots: { index: false, follow: false },
   icons: {
-    icon: [
-      {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
-    ],
-    apple: '/apple-icon.png',
+    icon: '/Logopirata.png',
+    apple: '/Logopirata.png',
   },
 }
 

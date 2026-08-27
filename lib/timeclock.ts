@@ -5,7 +5,7 @@
  * el mismo resultado en el navegador del kiosco y en el servidor.
  */
 
-import { dayKeyToDate, startOfMonthKey, startOfWeekKey } from '@/lib/tz'
+import { addDaysToKey, dayKeyToDate, startOfMonthKey, startOfWeekKey } from '@/lib/tz'
 
 export type Employee = {
   id: string
@@ -203,6 +203,44 @@ export function workedMinutes(p: Punch, nowMin: number, isToday: boolean): numbe
 /** Jornada abierta que ya no es de hoy: hay que corregirla desde el panel. */
 export function isDangling(p: Punch, todayKey: string): boolean {
   return p.out === null && p.day < todayKey
+}
+
+export type ResolucionCierre =
+  /** El fichaje abierto es de hace más de un día: es un olvido, no un turno
+   * en curso. Se deja para que el admin lo corrija y este toque abre uno
+   * nuevo, como si no hubiera nada pendiente. */
+  | { action: 'abrir' }
+  | { action: 'cerrar'; minute: number }
+  /** Doble toque, o alguien que se arrepiente al instante de la entrada. */
+  | { action: 'muy_pronto' }
+
+/**
+ * Decide qué hacer cuando alguien ficha y ya tiene un turno abierto. Puro:
+ * no toca la base, solo la lógica de horario — así el cruce de medianoche
+ * (entrar 23:50, salir 00:10) se puede probar sin un fichaje abierto real.
+ */
+export function resolverCierre(abierto: Punch, dayKey: string, minutes: number): ResolucionCierre {
+  const cruzoUnaMedianoche = abierto.day !== dayKey && addDaysToKey(abierto.day, 1) === dayKey
+  if (abierto.day !== dayKey && !cruzoUnaMedianoche) return { action: 'abrir' }
+
+  const minute = cruzoUnaMedianoche ? minutes + 1440 : minutes
+  if (minute <= abierto.in) return { action: 'muy_pronto' }
+
+  return { action: 'cerrar', minute }
+}
+
+/**
+ * Tramos de un empleado en un día, ordenados por hora de entrada — así el
+ * turno 1 es siempre el que arrancó primero, sin importar en qué orden se
+ * hayan cargado o corregido.
+ */
+export function tramosDelDia(punches: Punch[], day: string): Punch[] {
+  return punches.filter((p) => p.day === day).sort((a, b) => a.in - b.in)
+}
+
+/** Número de turno que le toca a un fichaje nuevo: uno más que los que ya tiene ese día. */
+export function proximoTurno(punches: Punch[], day: string): number {
+  return tramosDelDia(punches, day).length + 1
 }
 
 export type SummaryDay = {
