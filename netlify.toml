@@ -1,0 +1,16 @@
+[build]
+  command = "pnpm build"
+  publish = ".next"
+
+[build.environment]
+  # Next 16 pide Node 20 o superior. Fijamos la versión para que un cambio del
+  # default de Netlify no rompa un deploy que antes funcionaba.
+  NODE_VERSION = "22"
+  # Falla el build si el lockfile no coincide con package.json, en vez de
+  # resolver versiones distintas de las probadas en local.
+  PNPM_FLAGS = "--frozen-lockfile"
+
+# El runtime de Next.js de Netlify se encarga de las server actions, el
+# renderizado dinámico y las cabeceras definidas en next.config.mjs.
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
