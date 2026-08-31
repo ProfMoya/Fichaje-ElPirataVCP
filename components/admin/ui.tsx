@@ -273,7 +273,7 @@ export function Boton({
   children: React.ReactNode
   onClick?: () => void
   type?: 'button' | 'submit'
-  variant?: 'ghost' | 'primary' | 'danger'
+  variant?: 'ghost' | 'primary' | 'success' | 'danger'
   disabled?: boolean
   loading?: boolean
   className?: string
@@ -288,6 +288,7 @@ export function Boton({
         'focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50',
         variant === 'ghost' && 'text-muted-foreground hover:border-primary/50 hover:text-foreground',
         variant === 'primary' && 'border-primary/55 font-medium text-primary hover:glow-edge hover:border-primary',
+        variant === 'success' && 'border-success/55 font-medium text-success hover:glow-edge-success hover:border-success',
         variant === 'danger' && 'text-destructive hover:border-destructive/60',
         className,
       )}

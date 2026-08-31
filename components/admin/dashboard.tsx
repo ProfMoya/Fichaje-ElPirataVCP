@@ -1075,7 +1075,7 @@ function TabHistorial({
         hint="todos los fichajes del rango, filtrables y exportables"
         action={
           <div className="flex flex-wrap gap-2">
-            <Boton onClick={onNuevo} className="px-4 py-2">
+            <Boton onClick={onNuevo} variant="success" className="px-4 py-2">
               <CalendarPlus className="size-4" strokeWidth={1.6} />
               Cargar fichaje
             </Boton>
