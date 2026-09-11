@@ -73,6 +73,16 @@ comment on column public.punches.edited is
 create index if not exists punches_day_idx      on public.punches (day desc, in_min desc);
 create index if not exists punches_employee_idx on public.punches (employee_id, day desc);
 
+-- Como mucho un fichaje sin salida por empleado a la vez: sin esto, dos
+-- toques casi simultáneos del mismo PIN (doble tap, o dos terminales) pueden
+-- leer "sin fichaje abierto" los dos y abrir dos turnos en paralelo para la
+-- misma persona, inflando las horas trabajadas. `openPunch` en lib/repo.ts
+-- atrapa la violación de esta restricción (código 23505) y la traduce a un
+-- mensaje legible en vez de dejar que el insert falle en seco.
+create unique index if not exists punches_one_open_per_employee
+  on public.punches (employee_id)
+  where out_min is null;
+
 -- -------------------------------------------------------------- ajustes ------
 -- Compensaciones manuales por empleado: bonos (vendió más) o descuentos
 -- (rompió algo, faltó sin aviso). Se suman/restan del salario estimado en

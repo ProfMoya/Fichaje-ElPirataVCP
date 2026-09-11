@@ -211,7 +211,15 @@ export async function openPunch(employeeId: string, day: string, minute: number)
     .select(PUNCH_COLS)
     .single()
 
-  if (error) fail('registrar la entrada', error)
+  if (error) {
+    // El índice único `punches_one_open_per_employee` (out_min is null) salta
+    // cuando dos toques casi simultáneos del mismo PIN ya insertaron un turno
+    // abierto entre el getOpenPunch() previo y este insert.
+    if (error.code === UNIQUE_VIOLATION) {
+      throw new DbError('Ya hay un fichaje abierto para este empleado. Actualizá e intentá de nuevo.', error)
+    }
+    fail('registrar la entrada', error)
+  }
   return toPunch(data as PunchRow)
 }
 
@@ -290,7 +298,12 @@ export async function saveManualPunch(input: ManualPunch): Promise<Punch> {
       .select(PUNCH_COLS)
       .maybeSingle()
 
-    if (error) fail('corregir el fichaje', error)
+    if (error) {
+      if (error.code === UNIQUE_VIOLATION) {
+        throw new DbError('Este empleado ya tiene otro fichaje abierto. Cerralo antes de dejar este sin salida.', error)
+      }
+      fail('corregir el fichaje', error)
+    }
     if (!data) throw new DbError('Ese fichaje ya no existe. Actualizá y volvé a intentar.')
     return toPunch(data as PunchRow)
   }
@@ -308,7 +321,12 @@ export async function saveManualPunch(input: ManualPunch): Promise<Punch> {
     .select(PUNCH_COLS)
     .single()
 
-  if (error) fail('guardar el fichaje', error)
+  if (error) {
+    if (error.code === UNIQUE_VIOLATION) {
+      throw new DbError('Este empleado ya tiene otro fichaje abierto. Cerralo antes de cargar uno nuevo sin salida.', error)
+    }
+    fail('guardar el fichaje', error)
+  }
   return toPunch(data as PunchRow)
 }
 

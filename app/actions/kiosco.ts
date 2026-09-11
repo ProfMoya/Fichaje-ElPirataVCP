@@ -1,8 +1,8 @@
 'use server'
 
-import { headers } from 'next/headers'
 import { DbError } from '@/lib/db'
 import { rateLimit } from '@/lib/rate-limit'
+import { clientIp } from '@/lib/request-ip'
 import {
   closePunch,
   findEmployeeByPin,
@@ -48,9 +48,7 @@ export type PunchOutcome =
     }
 
 async function clientKey(prefix: string): Promise<string> {
-  const h = await headers()
-  const ip = (h.get('x-forwarded-for') ?? 'local').split(',')[0].trim()
-  return `${prefix}:${ip}`
+  return `${prefix}:${await clientIp()}`
 }
 
 async function abrirTurno(employeeId: string, name: string, dayKey: string, minutes: number): Promise<PunchOutcome> {

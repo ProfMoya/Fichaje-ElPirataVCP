@@ -44,6 +44,9 @@ export type Adjustment = {
 
 export const PIN_LENGTH = 4
 
+/** numeric(10,2) en la base: 8 dígitos enteros como máximo. */
+export const MONTO_MAXIMO = 99_999_999
+
 /* --------------------------------- formato -------------------------------- */
 
 export function formatTime(minutes: number | null | undefined): string {

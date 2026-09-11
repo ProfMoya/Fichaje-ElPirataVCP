@@ -52,6 +52,7 @@ import {
   formatShortDate,
   formatTimeLabel,
   formatWeekday,
+  MONTO_MAXIMO,
   parseTimeInput,
   toTimeInput,
   workedMinutes,
@@ -83,10 +84,6 @@ const TIPO_AJUSTE: Record<Adjustment['kind'], string> = {
   bonus: 'Bono / venta extra',
   deduction: 'Descuento',
 }
-
-/** Tope de la columna numeric(10,2) en la base: pasado esto, la tarjeta de
- * costo estimado desborda su ancho y el guardado en Supabase falla. */
-const MONTO_MAXIMO = 99_999_999
 
 /** Corta un monto tipeado en el input al tope de la columna antes de que llegue al servidor. */
 function limitarMonto(value: string): string {
@@ -359,7 +356,7 @@ export function AdminDashboard({
       )}
 
       <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-        <Stat icon={<Users className="size-4" />} label="Empleados registrados" value={`${activos}`} />
+        <Stat icon={<Users className="size-4" />} label="Empleados activos" value={`${activos}`} />
         <Stat icon={<LogIn className="size-4" />} label="Dentro ahora" value={`${dentroAhora}`} highlight />
         <Stat icon={<LogIn className="size-4" />} label="Entradas hoy" value={`${data.today.length}`} />
         <Stat icon={<LogOut className="size-4" />} label="Salidas hoy" value={`${salidasHoy}`} />
@@ -929,7 +926,7 @@ function TabHistorial({
     const filas = data.punches.map((p) => {
       const minutos = workedMinutes(p, data.nowMin, p.day === data.dayKey)
       return [
-        nombrePorId(p.employeeId),
+        nombrePorId(p.employeeId).replace(/[;\r\n]/g, ' '),
         p.day,
         formatTimeLabel(p.in),
         p.out === null ? '' : formatTimeLabel(p.out),

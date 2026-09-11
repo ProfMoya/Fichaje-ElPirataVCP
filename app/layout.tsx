@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Outfit, JetBrains_Mono } from 'next/font/google'
+import { ZoomControl } from '@/components/zoom-control'
 import './globals.css'
 
 const outfit = Outfit({
@@ -42,6 +43,7 @@ export default function RootLayout({
     <html lang="es-AR" className={`bg-background ${outfit.variable} ${mono.variable}`}>
       <body className="noise-bg bg-background font-sans antialiased">
         {children}
+        <ZoomControl />
       </body>
     </html>
   )

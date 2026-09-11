@@ -1,12 +1,13 @@
 'use server'
 
-import { headers } from 'next/headers'
 import { DbError } from '@/lib/db'
 import { rateLimit, clearRateLimit } from '@/lib/rate-limit'
+import { clientIp } from '@/lib/request-ip'
 import * as repo from '@/lib/repo'
 import {
   isValidPin,
   parseTimeInput,
+  MONTO_MAXIMO,
   type Adjustment,
   type Employee,
   type Punch,
@@ -47,9 +48,7 @@ function alFallar(error: unknown): { ok: false; message: string } {
 }
 
 async function ipKey(prefix: string): Promise<string> {
-  const h = await headers()
-  const ip = (h.get('x-forwarded-for') ?? 'local').split(',')[0].trim()
-  return `${prefix}:${ip}`
+  return `${prefix}:${await clientIp()}`
 }
 
 /* --------------------------------- sesión --------------------------------- */
@@ -190,9 +189,6 @@ function validarEmpleado(name: string, pin: string | undefined, requierePin: boo
   return null
 }
 
-// numeric(10,2) en la base: 8 dígitos enteros como máximo.
-const MONTO_MAXIMO = 99_999_999
-
 function validarSalario(hourlyWage: number | undefined): string | null {
   if (hourlyWage === undefined) return null
   if (!Number.isFinite(hourlyWage) || hourlyWage < 0) {
@@ -286,6 +282,13 @@ export type FichajeManual = {
   nota?: string
 }
 
+/** true si los rangos [aIn, aOut) y [bIn, bOut) se superponen. Un `out` abierto se trata como sin límite: un turno en curso "tapa" cualquier otro que empiece después. */
+function seSuperponen(aIn: number, aOut: number | null, bIn: number, bOut: number | null): boolean {
+  const finA = aOut ?? Infinity
+  const finB = bOut ?? Infinity
+  return aIn < finB && bIn < finA
+}
+
 export async function guardarFichaje(input: FichajeManual): Promise<Result<Punch>> {
   try {
     await requireSession()
@@ -309,6 +312,12 @@ export async function guardarFichaje(input: FichajeManual): Promise<Result<Punch
         )
       }
       if (salida > 2879) return fallo('La salida no puede superar las 47:59.')
+    }
+
+    const delDia = await repo.listPunches({ employeeId: input.employeeId, from: input.day, to: input.day })
+    const solapa = delDia.some((p) => p.id !== input.id && p.day === input.day && seSuperponen(entrada, salida, p.in, p.out))
+    if (solapa) {
+      return fallo('Ese horario se superpone con otro fichaje que ya tiene este empleado ese día.')
     }
 
     const punch = await repo.saveManualPunch({
