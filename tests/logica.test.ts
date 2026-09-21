@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { zonedNow, startOfWeekKey, startOfMonthKey, addDaysToKey, isValidDayKey } from '@/lib/tz'
+import { pickClientIp } from '@/lib/client-ip'
 import {
   formatTime, formatTimeLabel, formatDuration, formatDecimalHours,
   parseTimeInput, toTimeInput, workedMinutes, buildSummary, isValidPin,
   formatShortDate, formatWeekday, formatLongDate, resolverCierre,
-  tramosDelDia, proximoTurno, type Punch,
+  tramosDelDia, proximoTurno, MAX_JORNADA_MINUTOS, type Punch,
 } from '@/lib/timeclock'
 
 let n = 0
@@ -161,6 +163,61 @@ t('doble toque cruzando la medianoche tampoco cierra en 0', () => {
 t('turno abierto hace más de un día es un olvido, no un turno en curso', () => {
   const r = resolverCierre(p('2026-08-20', 480, null), '2026-08-26', 600)
   assert.deepEqual(r, { action: 'abrir' })
+})
+
+console.log('\nTOPE DE DURACIÓN DE UNA JORNADA')
+t('el tope es de 16 horas', () => {
+  assert.equal(MAX_JORNADA_MINUTOS, 960)
+})
+t('olvidó la salida y ficha a la misma hora del día siguiente: no se cierra con 24 horas', () => {
+  // Entró 10:00 del 25, vuelve a tocar 10:11 del 26 → serían 24h11m.
+  const r = resolverCierre(p('2026-08-25', 600, null), '2026-08-26', 611)
+  assert.deepEqual(r, { action: 'abrir' })
+})
+t('un turno nocturno largo pero real (justo el tope) sí se cierra', () => {
+  // Entra 18:00, sale 10:00 del día siguiente = 16h exactas.
+  const r = resolverCierre(p('2026-08-25', 1080, null), '2026-08-26', 600)
+  assert.deepEqual(r, { action: 'cerrar', minute: 2040 })
+})
+t('un minuto más que el tope ya no se cierra', () => {
+  const r = resolverCierre(p('2026-08-25', 1080, null), '2026-08-26', 601)
+  assert.deepEqual(r, { action: 'abrir' })
+})
+t('turno de hoy pasado del tope: no se cierra ni se abre otro encima', () => {
+  const r = resolverCierre(p('2026-08-26', 420, null), '2026-08-26', 420 + 961)
+  assert.deepEqual(r, { action: 'excedido' })
+})
+t('turno de hoy justo en el tope se cierra normal', () => {
+  const r = resolverCierre(p('2026-08-26', 420, null), '2026-08-26', 420 + 960)
+  assert.deepEqual(r, { action: 'cerrar', minute: 1380 })
+})
+
+console.log('\nIP DEL CLIENTE (rate-limit)')
+const headers = (h: Record<string, string>) => (name: string) => h[name] ?? null
+t('usa la IP verificada de Netlify aunque el cliente mande un x-forwarded-for falso', () => {
+  const ip = pickClientIp(headers({ 'x-nf-client-connection-ip': '200.1.2.3', 'x-forwarded-for': '6.6.6.6, 200.1.2.3' }))
+  assert.equal(ip, '200.1.2.3')
+})
+t('sin el header de Netlify toma el último salto, no el primero (que pone el cliente)', () => {
+  assert.equal(pickClientIp(headers({ 'x-forwarded-for': '6.6.6.6, 10.0.0.1, 200.1.2.3' })), '200.1.2.3')
+})
+t('sin ningún header cae a "local"', () => {
+  assert.equal(pickClientIp(headers({})), 'local')
+})
+
+console.log('\nESQUEMA DE LA BASE (supabase/schema.sql)')
+t('el índice de "un solo fichaje abierto" es por empleado y por día, nunca solo por empleado', () => {
+  // Un índice solo por empleado deja sin poder fichar a quien tiene un olvido
+  // viejo sin corregir (resolverCierre → 'abrir' inserta uno nuevo).
+  const sql = readFileSync(new URL('../supabase/schema.sql', import.meta.url), 'utf8')
+    .split('\n')
+    .filter((linea) => !linea.trim().startsWith('--'))
+    .join('\n')
+  const unicos = [...sql.matchAll(/create\s+unique\s+index[^;]*?on\s+public\.punches\s*\(([^)]*)\)\s*where\s+out_min\s+is\s+null/gi)]
+  assert.ok(unicos.length > 0, 'tiene que existir el índice que evita el doble toque simultáneo')
+  for (const [, columnas] of unicos) {
+    assert.match(columnas, /\bday\b/, `índice único sobre fichajes abiertos sin "day": (${columnas.trim()})`)
+  }
 })
 
 console.log('\nNUMERACIÓN DE TURNOS (horario cortado)')

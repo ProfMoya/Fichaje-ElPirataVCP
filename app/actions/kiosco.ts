@@ -7,6 +7,7 @@ import {
   closePunch,
   findEmployeeByPin,
   getOpenPunch,
+  listDanglingByEmployee,
   listPunchesByEmployee,
   openPunch,
 } from '@/lib/repo'
@@ -14,6 +15,7 @@ import {
   buildSummary,
   isValidPin,
   formatTime,
+  MAX_JORNADA_MINUTOS,
   proximoTurno,
   resolverCierre,
   tramosDelDia,
@@ -40,10 +42,12 @@ export type PunchOutcome =
       workedToday: number
       /** Posición del tramo dentro de los fichajes de ese empleado ese día (1, 2, ...). */
       turno: number
+      /** Días con una entrada que quedó sin salida y nadie corrigió todavía (YYYY-MM-DD). */
+      olvidados: string[]
     }
   | {
       ok: false
-      code: 'formato' | 'desconocido' | 'inactivo' | 'muy_pronto' | 'saturado' | 'servidor'
+      code: 'formato' | 'desconocido' | 'inactivo' | 'muy_pronto' | 'excedido' | 'saturado' | 'servidor'
       message: string
     }
 
@@ -51,11 +55,26 @@ async function clientKey(prefix: string): Promise<string> {
   return `${prefix}:${await clientIp()}`
 }
 
+/**
+ * Los fichajes olvidados de esa persona, para avisarle en la pantalla. Corre
+ * después de registrar el toque: si esta consulta falla no puede tumbar un
+ * fichaje que ya quedó guardado.
+ */
+async function diasOlvidados(employeeId: string, dayKey: string): Promise<string[]> {
+  try {
+    return (await listDanglingByEmployee(employeeId, dayKey)).map((p) => p.day)
+  } catch (error) {
+    console.error('[kiosco] no se pudieron leer los fichajes sin cerrar', error)
+    return []
+  }
+}
+
 async function abrirTurno(employeeId: string, name: string, dayKey: string, minutes: number): Promise<PunchOutcome> {
   const deHoy = await listPunchesByEmployee(employeeId, dayKey)
   const turno = proximoTurno(deHoy, dayKey)
   await openPunch(employeeId, dayKey, minutes)
-  return { ok: true, kind: 'in', name, minute: minutes, workedToday: 0, turno }
+  const olvidados = await diasOlvidados(employeeId, dayKey)
+  return { ok: true, kind: 'in', name, minute: minutes, workedToday: 0, turno, olvidados }
 }
 
 export async function registrarFichaje(pin: string): Promise<PunchOutcome> {
@@ -100,7 +119,7 @@ export async function registrarFichaje(pin: string): Promise<PunchOutcome> {
     // pares entrada/salida ya se cerraron hoy: el horario cortado ficha
     // varias veces por día.
     if (!abierto) {
-      return abrirTurno(employee.id, employee.name, dayKey, minutes)
+      return await abrirTurno(employee.id, employee.name, dayKey, minutes)
     }
 
     // El turno abierto puede venir de ayer (cruzó la medianoche, típico de
@@ -110,7 +129,7 @@ export async function registrarFichaje(pin: string): Promise<PunchOutcome> {
     const resolucion = resolverCierre(abierto, dayKey, minutes)
 
     if (resolucion.action === 'abrir') {
-      return abrirTurno(employee.id, employee.name, dayKey, minutes)
+      return await abrirTurno(employee.id, employee.name, dayKey, minutes)
     }
 
     if (resolucion.action === 'muy_pronto') {
@@ -118,6 +137,14 @@ export async function registrarFichaje(pin: string): Promise<PunchOutcome> {
         ok: false,
         code: 'muy_pronto',
         message: `Recién registraste tu entrada a las ${formatTime(abierto.in)}. Esperá un minuto antes de fichar la salida.`,
+      }
+    }
+
+    if (resolucion.action === 'excedido') {
+      return {
+        ok: false,
+        code: 'excedido',
+        message: `Tu entrada de las ${formatTime(abierto.in)} lleva más de ${MAX_JORNADA_MINUTOS / 60} horas abierta. Avisale a administración para que la corrija.`,
       }
     }
 
@@ -131,7 +158,9 @@ export async function registrarFichaje(pin: string): Promise<PunchOutcome> {
     const workedToday = tramos.reduce((acc, p) => acc + workedMinutes(p, resolucion.minute, true), 0)
     const turno = tramos.findIndex((p) => p.id === abierto.id) + 1
 
-    return { ok: true, kind: 'out', name: employee.name, minute: minutes, workedToday, turno }
+    const olvidados = await diasOlvidados(employee.id, dayKey)
+
+    return { ok: true, kind: 'out', name: employee.name, minute: minutes, workedToday, turno, olvidados }
   } catch (error) {
     return { ok: false, code: 'servidor', message: serverMessage(error) }
   }

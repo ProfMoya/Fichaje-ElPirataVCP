@@ -28,11 +28,14 @@ const ERRORES: Record<string, { title: string; icon: 'alerta' | 'reloj' | 'conex
   desconocido: { title: 'PIN no reconocido', icon: 'alerta' },
   inactivo: { title: 'Legajo dado de baja', icon: 'alerta' },
   muy_pronto: { title: 'Esperá un momento', icon: 'reloj' },
+  excedido: { title: 'Turno sin cerrar', icon: 'alerta' },
   saturado: { title: 'Demasiados intentos', icon: 'alerta' },
   servidor: { title: 'Sin conexión', icon: 'conexion' },
 }
 
 const RESET_EXITO = 4500
+// Con un aviso de salida olvidada hace falta más tiempo para leerlo.
+const RESET_AVISO = 9000
 const RESET_ERROR = 5000
 
 export default function KioskPage() {
@@ -108,10 +111,11 @@ export default function KioskPage() {
           minute: res.minute,
           workedToday: res.workedToday,
           turno: res.turno,
+          olvidados: res.olvidados,
         })
         setPin('')
         clearTimer()
-        timer.current = setTimeout(reset, RESET_EXITO)
+        timer.current = setTimeout(reset, res.olvidados.length > 0 ? RESET_AVISO : RESET_EXITO)
       } catch {
         // La server action ni siquiera llegó a ejecutarse: red caída,
         // función dormida o deploy en curso.

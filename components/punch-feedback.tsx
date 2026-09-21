@@ -1,12 +1,26 @@
 'use client'
 
 import { ArrowDownLeft, ArrowUpRight, Clock3, ShieldAlert, WifiOff } from 'lucide-react'
-import { formatDuration, formatLongDate, formatTime } from '@/lib/timeclock'
+import { formatDuration, formatLongDate, formatShortDate, formatTime } from '@/lib/timeclock'
 import { cn } from '@/lib/utils'
 
 export type Feedback =
-  | { type: 'success'; name: string; kind: 'in' | 'out'; minute: number; workedToday: number; turno: number }
+  | {
+      type: 'success'
+      name: string
+      kind: 'in' | 'out'
+      minute: number
+      workedToday: number
+      turno: number
+      olvidados: string[]
+    }
   | { type: 'error'; title: string; message: string; icon?: 'alerta' | 'reloj' | 'conexion' }
+
+function listarDias(days: string[]): string {
+  const fechas = days.slice(0, 3).map(formatShortDate)
+  const resto = days.length - fechas.length
+  return resto > 0 ? `${fechas.join(', ')} y ${resto} más` : fechas.join(', ')
+}
 
 const ICONS = {
   alerta: ShieldAlert,
@@ -70,6 +84,12 @@ export function PunchFeedback({ feedback, dayKey }: { feedback: Feedback; dayKey
           <p className="text-sm font-light tracking-wide text-muted-foreground sm:text-base">
             {formatLongDate(dayKey)}
           </p>
+          {feedback.olvidados.length > 0 && (
+            <p className="glass max-w-md rounded-2xl border-warning/50 px-5 py-3 text-pretty text-sm font-light text-warning sm:text-base">
+              Te quedó sin fichar la salida del {listarDias(feedback.olvidados)}. Avisale a administración para
+              que la corrija.
+            </p>
+          )}
         </div>
       ) : (
         <div className="flex flex-col items-center gap-3">

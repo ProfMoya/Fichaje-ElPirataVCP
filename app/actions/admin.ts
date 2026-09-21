@@ -7,6 +7,7 @@ import * as repo from '@/lib/repo'
 import {
   isValidPin,
   parseTimeInput,
+  MAX_JORNADA_MINUTOS,
   MONTO_MAXIMO,
   type Adjustment,
   type Employee,
@@ -312,6 +313,11 @@ export async function guardarFichaje(input: FichajeManual): Promise<Result<Punch
         )
       }
       if (salida > 2879) return fallo('La salida no puede superar las 47:59.')
+      if (salida - entrada > MAX_JORNADA_MINUTOS) {
+        return fallo(
+          `Una jornada no puede durar más de ${MAX_JORNADA_MINUTOS / 60} horas. Si trabajó en dos turnos, cargalos como fichajes separados.`,
+        )
+      }
     }
 
     const delDia = await repo.listPunches({ employeeId: input.employeeId, from: input.day, to: input.day })

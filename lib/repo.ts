@@ -369,6 +369,20 @@ export async function listDanglingPunches(beforeDay: string, limit = 200): Promi
   return (data as PunchRow[]).map(toPunch)
 }
 
+/** Fichajes sin salida de un empleado en días anteriores a `beforeDay`: los olvidos que todavía nadie corrigió. */
+export async function listDanglingByEmployee(employeeId: string, beforeDay: string): Promise<Punch[]> {
+  const { data, error } = await db()
+    .from('punches')
+    .select(PUNCH_COLS)
+    .eq('employee_id', employeeId)
+    .lt('day', beforeDay)
+    .is('out_min', null)
+    .order('day', { ascending: true })
+
+  if (error) fail('cargar tus fichajes sin cerrar', error)
+  return (data as PunchRow[]).map(toPunch)
+}
+
 /* -------------------------------- ajustes ---------------------------------- */
 
 export type AdjustmentFilter = {

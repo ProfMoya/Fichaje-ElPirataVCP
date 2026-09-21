@@ -208,14 +208,24 @@ export function isDangling(p: Punch, todayKey: string): boolean {
   return p.out === null && p.day < todayKey
 }
 
+/**
+ * Duración máxima de una jornada. Más que esto no es un turno: es alguien que
+ * se olvidó de fichar la salida y volvió a tocar el PIN al día siguiente —
+ * cerrarlo en ese momento cargaría 24 horas que nadie trabajó.
+ */
+export const MAX_JORNADA_MINUTOS = 16 * 60
+
 export type ResolucionCierre =
-  /** El fichaje abierto es de hace más de un día: es un olvido, no un turno
-   * en curso. Se deja para que el admin lo corrija y este toque abre uno
-   * nuevo, como si no hubiera nada pendiente. */
+  /** El fichaje abierto es un olvido (de hace más de un día, o que ya pasó
+   * el tope de duración): no se cierra con una hora inventada. Se deja para
+   * que el admin lo corrija y este toque abre uno nuevo. */
   | { action: 'abrir' }
   | { action: 'cerrar'; minute: number }
   /** Doble toque, o alguien que se arrepiente al instante de la entrada. */
   | { action: 'muy_pronto' }
+  /** Turno de hoy que ya pasó el tope: no se cierra con una duración imposible
+   * ni se abre otro encima (sería un segundo fichaje abierto el mismo día). */
+  | { action: 'excedido' }
 
 /**
  * Decide qué hacer cuando alguien ficha y ya tiene un turno abierto. Puro:
@@ -228,6 +238,10 @@ export function resolverCierre(abierto: Punch, dayKey: string, minutes: number):
 
   const minute = cruzoUnaMedianoche ? minutes + 1440 : minutes
   if (minute <= abierto.in) return { action: 'muy_pronto' }
+
+  if (minute - abierto.in > MAX_JORNADA_MINUTOS) {
+    return cruzoUnaMedianoche ? { action: 'abrir' } : { action: 'excedido' }
+  }
 
   return { action: 'cerrar', minute }
 }
